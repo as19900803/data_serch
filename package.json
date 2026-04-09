@@ -1,0 +1,15 @@
+{
+  "name": "mvdis-fee-checker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Automate MVDIS fuel fee lookup and export results to Excel.",
+  "type": "module",
+  "scripts": {
+    "check": "node src/check-fee.js",
+    "template": "node src/make-template.js"
+  },
+  "dependencies": {
+    "playwright": "^1.59.1",
+    "xlsx": "^0.18.5"
+  }
+}

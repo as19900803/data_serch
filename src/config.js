@@ -10,7 +10,8 @@ export const APP_CONFIG = {
     idNo: "#idNo",
     birthday: "#birthday",
     captchaInput: 'input[name="validateStr"]',
-    submitButton: 'button[type="submit"], input[type="submit"], button:has-text("查詢")',
-    pageTables: "table"
+    submitButton: "#submit_btn",
+    resultForm: "#fuelFeeForm",
+    fuelHeading: "h2"
   }
 };

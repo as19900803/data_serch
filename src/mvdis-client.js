@@ -43,10 +43,9 @@ export async function createMvdisClient() {
         });
 
         await page.fill(APP_CONFIG.selectors.captchaInput, captchaValue);
-        await Promise.all([
-          page.waitForLoadState("networkidle"),
-          page.click('#submit_btn') // 直接使用你找到的正確 ID
-        ]);
+        await page.click(APP_CONFIG.selectors.submitButton);
+
+        await waitForResultPage(page);
 
         const sections = await page.evaluate(extractFeeSectionsFromDocument);
         const pageText = flattenText(await page.textContent("body"));
@@ -58,6 +57,24 @@ export async function createMvdisClient() {
       }
     }
   };
+}
+
+async function waitForResultPage(page) {
+  try {
+    await Promise.race([
+      page.waitForURL(/\/fee\/fuelFee\/personal(?:[#?].*)?$/, { timeout: 10000 }),
+      page.waitForSelector(APP_CONFIG.selectors.resultForm, { timeout: 10000 }),
+      page.waitForFunction(
+        () =>
+          Array.from(document.querySelectorAll("h2")).some((node) =>
+            (node.textContent || "").includes("公路養管費")
+          ),
+        { timeout: 10000 }
+      )
+    ]);
+  } catch {
+    await page.waitForLoadState("networkidle").catch(() => {});
+  }
 }
 
 export function buildResultFromSections(application, sections, pageText = "") {
@@ -96,15 +113,17 @@ function parseFuelFeeRows(rows) {
   const hasCheckboxColumn = normalizedHeader[0] === "" && normalizedHeader[1] === "車種";
   const offset = hasCheckboxColumn ? 1 : 0;
 
-  if (!matchesHeader(normalizedHeader.slice(offset), [
-    "車種",
-    "車號",
-    "期別",
-    "繳納期限",
-    "監理單位",
-    "待繳金額",
-    "備註"
-  ])) {
+  if (
+    !matchesHeader(normalizedHeader.slice(offset), [
+      "車種",
+      "車號",
+      "期別",
+      "繳納期限",
+      "監理單位",
+      "待繳金額",
+      "備註"
+    ])
+  ) {
     return [];
   }
 
@@ -130,14 +149,16 @@ function parsePenaltyRows(rows) {
   const [header, ...body] = rows;
   const normalizedHeader = header.map(flattenText);
 
-  if (!matchesHeader(normalizedHeader, [
-    "車號",
-    "單號",
-    "監理單位",
-    "繳納罰鍰期限",
-    "罰鍰",
-    "備註"
-  ])) {
+  if (
+    !matchesHeader(normalizedHeader, [
+      "車號",
+      "單號",
+      "監理單位",
+      "繳納罰鍰期限",
+      "罰鍰",
+      "備註"
+    ])
+  ) {
     return [];
   }
 

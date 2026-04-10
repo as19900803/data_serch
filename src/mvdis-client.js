@@ -45,19 +45,12 @@ export async function createMvdisClient() {
         await page.fill(APP_CONFIG.selectors.captchaInput, captchaValue);
         await Promise.all([
           page.waitForLoadState("networkidle"),
-          page.locator(APP_CONFIG.selectors.submitButton).first().click()
+          page.click('#submit_btn') // 直接使用你找到的正確 ID
         ]);
 
-        const tables = await page.locator(APP_CONFIG.selectors.pageTables).evaluateAll((nodes) =>
-          nodes.map((node) =>
-            Array.from(node.querySelectorAll("tr")).map((row) =>
-              Array.from(row.querySelectorAll("th,td")).map((cell) => cell.textContent || "")
-            )
-          )
-        );
-
+        const sections = await page.evaluate(extractFeeSectionsFromDocument);
         const pageText = flattenText(await page.textContent("body"));
-        return buildResultFromTables(application, tables, pageText);
+        return buildResultFromSections(application, sections, pageText);
       } catch (error) {
         return emptyResult(application, "失敗", error.message);
       } finally {
@@ -67,43 +60,18 @@ export async function createMvdisClient() {
   };
 }
 
-function buildResultFromTables(application, tables, pageText) {
+export function buildResultFromSections(application, sections, pageText = "") {
   const result = emptyResult(application, "成功");
 
-  for (const table of tables) {
-    const normalized = table
-      .map((row) => row.map((cell) => flattenText(cell)))
-      .filter((row) => row.some(Boolean));
+  const fuelSection = findSectionByTitle(sections, "公路養管費");
+  const penaltySection = findSectionByTitle(sections, "公路養管費逾期罰鍰");
 
-    const header = normalized[0] ?? [];
-    const body = normalized.slice(1);
+  if (fuelSection) {
+    result.fuelFeeRows.push(...parseFuelFeeRows(fuelSection.rows));
+  }
 
-    if (matchesHeader(header, ["車種", "車號", "期別", "繳納期限", "監理單位", "待繳金額", "備註"])) {
-      result.fuelFeeRows.push(
-        ...body.map((row) => ({
-          車種: row[0] ?? "",
-          車號: row[1] ?? "",
-          期別: row[2] ?? "",
-          繳納期限: row[3] ?? "",
-          監理單位: row[4] ?? "",
-          待繳金額: row[5] ?? "",
-          備註: row[6] ?? ""
-        }))
-      );
-    }
-
-    if (matchesHeader(header, ["車號", "單號", "監理單位", "繳納罰鍰期限", "罰鍰", "備註"])) {
-      result.penaltyRows.push(
-        ...body.map((row) => ({
-          車號: row[0] ?? "",
-          單號: row[1] ?? "",
-          監理單位: row[2] ?? "",
-          繳納罰鍰期限: row[3] ?? "",
-          罰鍰: row[4] ?? "",
-          備註: row[5] ?? ""
-        }))
-      );
-    }
+  if (penaltySection) {
+    result.penaltyRows.push(...parsePenaltyRows(penaltySection.rows));
   }
 
   if (!result.fuelFeeRows.length && !result.penaltyRows.length && pageText.includes("驗證碼")) {
@@ -114,10 +82,140 @@ function buildResultFromTables(application, tables, pageText) {
   return result;
 }
 
+function findSectionByTitle(sections, title) {
+  return sections.find((section) => section.title === title);
+}
+
+function parseFuelFeeRows(rows) {
+  if (!rows.length) {
+    return [];
+  }
+
+  const [header, ...body] = rows;
+  const normalizedHeader = header.map(flattenText);
+  const hasCheckboxColumn = normalizedHeader[0] === "" && normalizedHeader[1] === "車種";
+  const offset = hasCheckboxColumn ? 1 : 0;
+
+  if (!matchesHeader(normalizedHeader.slice(offset), [
+    "車種",
+    "車號",
+    "期別",
+    "繳納期限",
+    "監理單位",
+    "待繳金額",
+    "備註"
+  ])) {
+    return [];
+  }
+
+  return body
+    .map((row) => row.map(flattenText))
+    .filter((row) => row.some(Boolean))
+    .map((row) => ({
+      車種: row[offset] ?? "",
+      車號: row[offset + 1] ?? "",
+      期別: row[offset + 2] ?? "",
+      繳納期限: row[offset + 3] ?? "",
+      監理單位: row[offset + 4] ?? "",
+      待繳金額: row[offset + 5] ?? "",
+      備註: row[offset + 6] ?? ""
+    }));
+}
+
+function parsePenaltyRows(rows) {
+  if (!rows.length) {
+    return [];
+  }
+
+  const [header, ...body] = rows;
+  const normalizedHeader = header.map(flattenText);
+
+  if (!matchesHeader(normalizedHeader, [
+    "車號",
+    "單號",
+    "監理單位",
+    "繳納罰鍰期限",
+    "罰鍰",
+    "備註"
+  ])) {
+    return [];
+  }
+
+  const normalizedBody = body
+    .map((row) => row.map(flattenText))
+    .filter((row) => row.some(Boolean));
+
+  if (
+    normalizedBody.length === 1 &&
+    normalizedBody[0].length === 1 &&
+    normalizedBody[0][0].includes("查無須繳納之罰鍰")
+  ) {
+    return [];
+  }
+
+  return normalizedBody.map((row) => ({
+    車號: row[0] ?? "",
+    單號: row[1] ?? "",
+    監理單位: row[2] ?? "",
+    繳納罰鍰期限: row[3] ?? "",
+    罰鍰: row[4] ?? "",
+    備註: row[5] ?? ""
+  }));
+}
+
 function matchesHeader(actual, expected) {
   if (actual.length < expected.length) {
     return false;
   }
 
   return expected.every((label, index) => (actual[index] ?? "").includes(label));
+}
+
+function extractFeeSectionsFromDocument() {
+  const form = document.querySelector("#fuelFeeForm") ?? document;
+  const sections = [];
+  const headings = Array.from(form.querySelectorAll("h2"));
+
+  for (const heading of headings) {
+    const title = normalizeDomText(heading.textContent);
+    let next = heading.nextElementSibling;
+    let table = null;
+
+    while (next) {
+      if (next.tagName === "H2") {
+        break;
+      }
+
+      if (next.tagName === "TABLE") {
+        table = next;
+        break;
+      }
+
+      table = next.querySelector?.("table") ?? null;
+      if (table) {
+        break;
+      }
+
+      next = next.nextElementSibling;
+    }
+
+    sections.push({
+      title,
+      rows: table ? extractRowsFromTable(table) : []
+    });
+  }
+
+  return sections;
+}
+
+function extractRowsFromTable(table) {
+  return Array.from(table.querySelectorAll("tr")).map((row) =>
+    Array.from(row.querySelectorAll("th, td")).map((cell) => normalizeDomText(cell.textContent))
+  );
+}
+
+function normalizeDomText(value) {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
 }

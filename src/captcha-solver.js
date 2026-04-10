@@ -4,7 +4,7 @@ export async function solveCaptcha({ page, application }) {
   console.log("正在解析圖形驗證碼...");
   
   // 1. 抓取驗證碼圖片的元素 (請把 #captcha-img 換成監理站實際的圖片選取器)
-  const captchaElement = await page.waitForSelector('#captcha-img');
+  const captchaElement = await page.waitForSelector('#pickimg1');
   
   // 2. 將圖片截圖並轉成 Base64
   const imageBuffer = await captchaElement.screenshot();
@@ -20,3 +20,10 @@ export async function solveCaptcha({ page, application }) {
   
   return resultText;
 }
+
+
+
+
+
+
+
